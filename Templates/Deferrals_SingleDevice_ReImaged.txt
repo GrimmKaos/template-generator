@@ -1,0 +1,1 @@
+This device has been re-imaged {Device Name}. A request is open for remediation. A lengthy request is open due to no SLA for request completion by teams external to Workplace Services. See {Request Number}

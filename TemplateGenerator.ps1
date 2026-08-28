@@ -41,7 +41,10 @@ $window.Content = $rootGrid
 $ticketTab = New-Object System.Windows.Controls.TabItem
 $ticketTab.Header = "Tickets"
 $tabs.Items.Add($ticketTab) | Out-Null
-foreach ($name in @("Deferrals", "Requests")) {
+$deferralTab = New-Object System.Windows.Controls.TabItem
+$deferralTab.Header = "Deferrals"
+$tabs.Items.Add($deferralTab) | Out-Null
+foreach ($name in @("Requests")) {
     $tab = New-Object System.Windows.Controls.TabItem
     $tab.Header = $name
     $tab.IsEnabled = $false
@@ -218,4 +221,107 @@ $next.Add_Click({
 
 $back.Add_Click({ if ($state.Step -gt 0) { if ($state.Step -eq 2) { $state.Template = $null }; $state.Step--; Show-Step } })
 Show-Step
+
+# Deferrals workflow: device count -> template -> template-specific data -> output.
+$deferralTemplatePath = Join-Path $root "Templates\Deferrals_SingleDevice_ReImaged.txt"
+$deferralState = @{ Step = 0; DeviceCount = $null; Template = $null; Data = @{}; Output = "" }
+$deferralLayout = New-Object System.Windows.Controls.Grid
+$deferralLayout.Margin = "12"
+$deferralLayout.RowDefinitions.Add((New-Object System.Windows.Controls.RowDefinition -Property @{ Height = "*" }))
+$deferralLayout.RowDefinitions.Add((New-Object System.Windows.Controls.RowDefinition -Property @{ Height = "Auto" }))
+$deferralContent = New-Object System.Windows.Controls.StackPanel
+$deferralContent.Margin = "0,0,0,10"
+[System.Windows.Controls.Grid]::SetRow($deferralContent, 0)
+$deferralLayout.Children.Add($deferralContent) | Out-Null
+$deferralButtons = New-Object System.Windows.Controls.StackPanel
+$deferralButtons.Orientation = "Horizontal"
+$deferralButtons.HorizontalAlignment = "Right"
+[System.Windows.Controls.Grid]::SetRow($deferralButtons, 1)
+$deferralBack = New-Object System.Windows.Controls.Button
+$deferralBack.Content = "< Back"; $deferralBack.Width = 90; $deferralBack.Margin = "0,0,8,0"
+$deferralNext = New-Object System.Windows.Controls.Button
+$deferralNext.Content = "Next >"; $deferralNext.Width = 90
+$deferralButtons.Children.Add($deferralBack) | Out-Null
+$deferralButtons.Children.Add($deferralNext) | Out-Null
+$deferralLayout.Children.Add($deferralButtons) | Out-Null
+$deferralTab.Content = $deferralLayout
+$deferralControls = @{}
+
+function Add-DeferralField {
+    param([string]$key, [string]$label)
+    $labelControl = New-Object System.Windows.Controls.TextBlock -Property @{ Text = $label; Margin = "0,3,0,2" }
+    $box = New-Object System.Windows.Controls.TextBox -Property @{ Margin = "0,0,0,8" }
+    $deferralContent.Children.Add($labelControl) | Out-Null
+    $deferralContent.Children.Add($box) | Out-Null
+    $deferralControls[$key] = $box
+}
+
+function Show-DeferralStep {
+    $deferralContent.Children.Clear()
+    $deferralControls.Clear()
+    $heading.Text = "Template Generator - Deferrals - Step $($deferralState.Step + 1) of 4"
+    switch ($deferralState.Step) {
+        0 {
+            $single = New-Object System.Windows.Controls.RadioButton -Property @{ Content = "Single Device"; Margin = "0,8,0,8" }
+            $single.IsChecked = ($deferralState.DeviceCount -eq "Single")
+            $single.Add_Checked({ $deferralState.DeviceCount = "Single" })
+            $multiple = New-Object System.Windows.Controls.RadioButton -Property @{ Content = "Multiple Devices"; Margin = "0,8,0,8" }
+            $multiple.IsChecked = ($deferralState.DeviceCount -eq "Multiple")
+            $multiple.Add_Checked({ $deferralState.DeviceCount = "Multiple" })
+            $deferralContent.Children.Add($single) | Out-Null
+            $deferralContent.Children.Add($multiple) | Out-Null
+        }
+        1 {
+            $list = New-Object System.Windows.Controls.ListBox
+            $list.Height = 100
+            if ($deferralState.DeviceCount -eq "Single") { $list.Items.Add("Device Re-Imaged") | Out-Null }
+            else { $list.Items.Add("Multiple Device Deferral (to be defined)") | Out-Null }
+            $list.SelectedIndex = 0
+            $list.Add_SelectionChanged({ $deferralState.Template = $list.SelectedItem.ToString() })
+            $deferralContent.Children.Add($list) | Out-Null
+            $deferralState.Template = $list.SelectedItem.ToString()
+        }
+        2 {
+            if ($deferralState.DeviceCount -eq "Single" -and $deferralState.Template -eq "Device Re-Imaged") {
+                Add-DeferralField "DeviceName" "Device Name:"
+                Add-DeferralField "RequestNumber" "Request Number:"
+            } else {
+                $deferralContent.Children.Add((New-Object System.Windows.Controls.TextBlock -Property @{ Text = "This template's fields have not been defined yet." })) | Out-Null
+            }
+        }
+        3 {
+            $output = New-Object System.Windows.Controls.TextBox
+            $output.IsReadOnly = $true; $output.TextWrapping = "Wrap"; $output.AcceptsReturn = $true; $output.Height = 300
+            $output.Text = $deferralState.Output
+            $deferralContent.Children.Add($output) | Out-Null
+            $copy = New-Object System.Windows.Controls.Button -Property @{ Content = "Copy Output"; Width = 110; Margin = "0,10,0,0" }
+            $copy.Add_Click({ [System.Windows.Clipboard]::SetText($deferralState.Output); [System.Windows.MessageBox]::Show("Output copied to clipboard.") | Out-Null })
+            $deferralContent.Children.Add($copy) | Out-Null
+            $deferralNext.IsEnabled = $false
+        }
+    }
+    $deferralBack.IsEnabled = ($deferralState.Step -gt 0)
+    if ($deferralState.Step -lt 3) { $deferralNext.IsEnabled = $true }
+    $deferralNext.Content = if ($deferralState.Step -eq 2) { "Generate" } else { "Next >" }
+}
+
+$deferralNext.Add_Click({
+    if ($deferralState.Step -eq 0 -and $null -eq $deferralState.DeviceCount) {
+        [System.Windows.MessageBox]::Show("Choose Single Device or Multiple Devices.", "Required", "OK", "Warning") | Out-Null
+        return
+    }
+    if ($deferralState.Step -eq 2) {
+        foreach ($key in $deferralControls.Keys) { $deferralState.Data[$key] = $deferralControls[$key].Text }
+        if ([string]::IsNullOrWhiteSpace($deferralState.Data["DeviceName"]) -or [string]::IsNullOrWhiteSpace($deferralState.Data["RequestNumber"])) {
+            [System.Windows.MessageBox]::Show("Device Name and Request Number are required.", "Required", "OK", "Warning") | Out-Null
+            return
+        }
+        $template = Get-Content -LiteralPath $deferralTemplatePath -Raw
+        $deferralState.Output = $template.Replace("{Device Name}", $deferralState.Data["DeviceName"].Trim()).Replace("{Request Number}", $deferralState.Data["RequestNumber"].Trim())
+    }
+    if ($deferralState.Step -lt 3) { $deferralState.Step++; Show-DeferralStep }
+})
+$deferralBack.Add_Click({ if ($deferralState.Step -gt 0) { $deferralState.Step--; Show-DeferralStep } })
+Show-DeferralStep
+
 $window.ShowDialog() | Out-Null
