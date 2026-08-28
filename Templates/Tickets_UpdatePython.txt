@@ -1,0 +1,10 @@
+Summary: Vulnerability Remediation - {DeviceName}
+
+Issue(s): Python installs need to be updated. You currently have {Installed Python} on your device ({DeviceName})
+User: {UserName}
+E/C Code: {E_C-Code}
+Phone: {PhoneNumber}
+Device: {DeviceName}
+Completion Deadline: {CompletionDeadDate}
+
+Solution(s): {Solution}
