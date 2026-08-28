@@ -5,8 +5,11 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$templatePath = Join-Path $root "Templates\Tickets_UpdatePython.txt"
-if (-not (Test-Path -LiteralPath $templatePath)) { throw "Missing template: $templatePath" }
+$ticketTemplateDirectory = Join-Path $root "Templates\Tickets"
+if (-not (Test-Path -LiteralPath $ticketTemplateDirectory)) { throw "Missing ticket template folder: $ticketTemplateDirectory" }
+$issueCatalogPath = Join-Path $ticketTemplateDirectory "Issues.json"
+if (-not (Test-Path -LiteralPath $issueCatalogPath)) { throw "Missing issue catalog: $issueCatalogPath" }
+$issueCatalog = Get-Content -LiteralPath $issueCatalogPath -Raw | ConvertFrom-Json
 
 $state = @{
     AssignmentKnown = $null
@@ -77,6 +80,7 @@ $ticketTab.Content = $layout
 
 $state.Step = 0
 $controls = @{}
+$ticketTemplates = @()
 $steps = @(
     "Known User or Location",
     "Data Input",
@@ -96,6 +100,48 @@ function Add-LabelAndBox {
     $content.Children.Add($text) | Out-Null
     $content.Children.Add($box) | Out-Null
     $controls[$key] = $box
+}
+
+function Add-DateField {
+    param([string]$key, [string]$label)
+    $text = New-Object System.Windows.Controls.TextBlock
+    $text.Text = $label
+    $text.Margin = "0,3,0,2"
+    $picker = New-Object System.Windows.Controls.DatePicker
+    $picker.Margin = "0,0,0,7"
+    $picker.SelectedDateFormat = "Short"
+    $content.Children.Add($text) | Out-Null
+    $content.Children.Add($picker) | Out-Null
+    $controls[$key] = $picker
+}
+
+function Add-IssueSelector {
+    $label = New-Object System.Windows.Controls.TextBlock
+    $label.Text = "Issue(s): Select all that apply"
+    $label.Margin = "0,3,0,2"
+    $scroll = New-Object System.Windows.Controls.ScrollViewer
+    $scroll.Height = 145
+    $scroll.VerticalScrollBarVisibility = "Auto"
+    $issuePanel = New-Object System.Windows.Controls.StackPanel
+    $checkboxes = @()
+    foreach ($issue in @($issueCatalog.Items)) {
+        $check = New-Object System.Windows.Controls.CheckBox
+        $check.Content = [string]$issue
+        $check.Margin = "2,2,2,2"
+        if (($state.Data["Issues"] -split ", ") -contains [string]$issue) { $check.IsChecked = $true }
+        $issuePanel.Children.Add($check) | Out-Null
+        $checkboxes += $check
+    }
+    $other = New-Object System.Windows.Controls.TextBox
+    $other.Margin = "2,8,2,2"
+    $other.ToolTip = "Enter another issue. Separate multiple items with commas."
+    $other.Text = [string]$state.Data["OtherIssue"]
+    $issuePanel.Children.Add((New-Object System.Windows.Controls.TextBlock -Property @{ Text = "Other:"; Margin = "2,8,2,2" })) | Out-Null
+    $issuePanel.Children.Add($other) | Out-Null
+    $scroll.Content = $issuePanel
+    $content.Children.Add($label) | Out-Null
+    $content.Children.Add($scroll) | Out-Null
+    $controls["IssueSelector"] = @{ Checkboxes = $checkboxes; Other = $other }
 }
 
 function Show-Step {
@@ -124,34 +170,50 @@ function Show-Step {
                 Add-LabelAndBox "UserName" "User:"
                 Add-LabelAndBox "ECCode" "E/C Code:"
                 Add-LabelAndBox "PhoneNumber" "Phone:"
-                Add-LabelAndBox "CompletionDeadDate" "Completion Deadline:"
+                Add-DateField "CompletionDeadDate" "Completion Deadline:"
             } else {
                 Add-LabelAndBox "LastKnownLocation" "Last Known Location:"
-                Add-LabelAndBox "CompletionDeadDate" "Completion Deadline:"
+                Add-DateField "CompletionDeadDate" "Completion Deadline:"
             }
-            Add-LabelAndBox "Issues" "Issue(s):" $true
+            Add-IssueSelector
         }
         2 {
             $list = New-Object System.Windows.Controls.ListBox
             $list.Height = 150
-            $list.Items.Add("Update Python") | Out-Null
-            $list.SelectedIndex = 0
-            $list.Add_SelectionChanged({ $state.Template = $list.SelectedItem.ToString() })
+            foreach ($template in $ticketTemplates) { [void]$list.Items.Add($template.Name) }
+            $list.Tag = @{ State = $state; Templates = $ticketTemplates }
+            $list.Add_SelectionChanged({
+                param($sender, $eventArgs)
+                if ($null -ne $sender.SelectedItem) {
+                    $sender.Tag.State.Template = $sender.Tag.Templates | Where-Object { $_.Name -eq $sender.SelectedItem.ToString() } | Select-Object -First 1
+                }
+            })
             $content.Children.Add($list) | Out-Null
-            $state.Template = "Update Python"
+            if ($list.Items.Count -gt 0) {
+                $list.SelectedIndex = 0
+                $state.Template = $ticketTemplates[0]
+            }
         }
         3 {
-            Add-LabelAndBox "InstalledPython" "Installed Python version(s): (example: 3.8.10, 3.9.13)"
-            $action = New-Object System.Windows.Controls.ComboBox
-            $action.Items.Add("Update to a target version") | Out-Null
-            $action.Items.Add("Remove the affected version(s)") | Out-Null
-            $action.SelectedIndex = 0
-            $action.Margin = "0,0,0,8"
-            $content.Children.Add((New-Object System.Windows.Controls.TextBlock -Property @{ Text = "Action:" })) | Out-Null
-            $content.Children.Add($action) | Out-Null
-            $controls["Action"] = $action
-            Add-LabelAndBox "TargetVersion" "Target Python version (required for update):"
-            Add-LabelAndBox "SolutionNotes" "Additional solution details (optional):" $true
+            if ($null -eq $state.Template) {
+                $content.Children.Add((New-Object System.Windows.Controls.TextBlock -Property @{ Text = "Select a template before continuing." })) | Out-Null
+            } elseif ($state.Template.RequiresAdditionalInput -eq $true) {
+                foreach ($field in @($state.Template.AdditionalFields)) {
+                    if ($field.Type -eq "Choice") {
+                        $label = New-Object System.Windows.Controls.TextBlock -Property @{ Text = $field.Label; Margin = "0,3,0,2" }
+                        $choice = New-Object System.Windows.Controls.ComboBox -Property @{ Margin = "0,0,0,7" }
+                        foreach ($option in @($field.Options)) { [void]$choice.Items.Add($option) }
+                        if ($choice.Items.Count -gt 0) { $choice.SelectedIndex = 0 }
+                        $content.Children.Add($label) | Out-Null
+                        $content.Children.Add($choice) | Out-Null
+                        $controls[$field.Name] = $choice
+                    } else {
+                        Add-LabelAndBox $field.Name $field.Label ($field.Type -eq "Multiline")
+                    }
+                }
+            } else {
+                $content.Children.Add((New-Object System.Windows.Controls.TextBlock -Property @{ Text = "This template requires no additional input." })) | Out-Null
+            }
         }
         4 {
             $output = New-Object System.Windows.Controls.TextBox
@@ -169,6 +231,21 @@ function Show-Step {
             $copy.HorizontalAlignment = "Left"
             $copy.Add_Click({ [System.Windows.Clipboard]::SetText($state.Output); [System.Windows.MessageBox]::Show("Output copied to clipboard.") | Out-Null })
             $content.Children.Add($copy) | Out-Null
+            $startOver = New-Object System.Windows.Controls.Button
+            $startOver.Content = "Start Over"
+            $startOver.Width = 100
+            $startOver.Margin = "0,10,0,0"
+            $startOver.HorizontalAlignment = "Left"
+            $startOver.Add_Click({
+                $state.Step = 0
+                $state.AssignmentKnown = $null
+                $state.Data.Clear()
+                $state.Additional.Clear()
+                $state.Template = $null
+                $state.Output = ""
+                Show-Step
+            })
+            $content.Children.Add($startOver) | Out-Null
             $next.IsEnabled = $false
         }
     }
@@ -178,7 +255,22 @@ function Show-Step {
 }
 
 function Read-CurrentControls {
-    foreach ($key in $controls.Keys) { $state.Data[$key] = $controls[$key].Text }
+    foreach ($key in $controls.Keys) {
+        if ($key -eq "IssueSelector") {
+            $selected = @($controls[$key].Checkboxes | Where-Object { $_.IsChecked -eq $true } | ForEach-Object { [string]$_.Content })
+            $otherIssues = [string]$controls[$key].Other.Text
+            if (-not [string]::IsNullOrWhiteSpace($otherIssues)) { $selected += @($otherIssues -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+            $state.Data["Issues"] = ($selected -join ", ")
+            $state.Data["OtherIssue"] = $otherIssues
+        } elseif ($controls[$key] -is [System.Windows.Controls.DatePicker]) {
+            $selectedDate = $controls[$key].SelectedDate
+            $state.Data[$key] = if ($null -ne $selectedDate) {
+                ([datetime]$selectedDate).ToString("yyyy-MM-dd")
+            } else { "" }
+        } else {
+            $state.Data[$key] = $controls[$key].Text
+        }
+    }
     if ($controls.ContainsKey("Action")) { $state.Additional["Action"] = $controls["Action"].SelectedIndex }
 }
 
@@ -188,38 +280,53 @@ $next.Add_Click({
         return
     }
     if ($state.Step -eq 1) { Read-CurrentControls }
-    if ($state.Step -eq 3) {
+    if ($state.Step -eq 2 -and $null -eq $state.Template) {
+        [System.Windows.MessageBox]::Show("Select a ticket template before continuing.", "Required", "OK", "Warning") | Out-Null
+        return
+    }
+    if ($state.Step -eq 3 -and $state.Template.RequiresAdditionalInput -eq $true) {
         Read-CurrentControls
-        if ([string]::IsNullOrWhiteSpace($state.Data["InstalledPython"])) {
-            [System.Windows.MessageBox]::Show("Enter the installed Python version(s).", "Required", "OK", "Warning") | Out-Null
-            return
+        foreach ($field in @($state.Template.AdditionalFields)) {
+            $value = [string]$state.Data[$field.Name]
+            $required = $field.Required -eq $true
+            if (-not $required -and $field.RequiredWhen) {
+                $parts = $field.RequiredWhen -split "=", 2
+                $required = ([string]$state.Data[$parts[0]] -eq $parts[1])
+            }
+            if ($required -and [string]::IsNullOrWhiteSpace($value)) {
+                [System.Windows.MessageBox]::Show("Enter $($field.Label)", "Required", "OK", "Warning") | Out-Null
+                return
+            }
         }
-        $isUpdate = $state.Additional["Action"] -eq 0
-        if ($isUpdate -and [string]::IsNullOrWhiteSpace($state.Data["TargetVersion"])) {
-            [System.Windows.MessageBox]::Show("Enter the target Python version, or choose removal.", "Required", "OK", "Warning") | Out-Null
-            return
+    }
+    if ($state.Step -eq 3 -and $state.Template.RequiresAdditionalInput -ne $true) { Read-CurrentControls }
+    if ($state.Step -eq 3) {
+        $output = [string]$state.Template.Content
+        foreach ($key in $state.Data.Keys) { $output = $output.Replace("{$key}", [string]$state.Data[$key]) }
+        $solution = ""
+        if ($state.Template.Name -eq "Update Python") {
+            $installedKey = ($state.Template.AdditionalFields | Where-Object { $_.Name -like "InstalledPython_*" } | Select-Object -First 1).Name
+            $actionKey = ($state.Template.AdditionalFields | Where-Object { $_.Name -like "Action_*" } | Select-Object -First 1).Name
+            $targetKey = ($state.Template.AdditionalFields | Where-Object { $_.Name -like "TargetVersion_*" } | Select-Object -First 1).Name
+            $notesKey = ($state.Template.AdditionalFields | Where-Object { $_.Name -like "SolutionNotes_*" } | Select-Object -First 1).Name
+            $installed = [string]$state.Data[$installedKey]
+            $device = [string]$state.Data["DeviceName"]
+            $solution = if ([string]$state.Data[$actionKey] -eq "Update to a target version") { "Update Python version(s) $installed to $($state.Data[$targetKey]) on $device." } else { "Remove the affected Python version(s) $installed from $device." }
+            if (-not [string]::IsNullOrWhiteSpace([string]$state.Data[$notesKey])) { $solution += " " + $state.Data[$notesKey] }
         }
-        $installed = $state.Data["InstalledPython"].Trim()
-        $device = $state.Data["DeviceName"].Trim()
-        $solution = if ($isUpdate) { "Update Python version(s) $installed to $($state.Data["TargetVersion"].Trim()) on $device." } else { "Remove the affected Python version(s) $installed from $device." }
-        if (-not [string]::IsNullOrWhiteSpace($state.Data["SolutionNotes"])) { $solution += " " + $state.Data["SolutionNotes"].Trim() }
-        $output = Get-Content -LiteralPath $templatePath -Raw
-        $replacements = @{
-            "{DeviceName}" = $device
-            "{Installed Python}" = $installed
-            "{UserName}" = if ($state.Data.ContainsKey("UserName")) { $state.Data["UserName"] } else { "" }
-            "{E_C-Code}" = if ($state.Data.ContainsKey("ECCode")) { $state.Data["ECCode"] } else { "" }
-            "{PhoneNumber}" = if ($state.Data.ContainsKey("PhoneNumber")) { $state.Data["PhoneNumber"] } else { "" }
-            "{CompletionDeadDate}" = $state.Data["CompletionDeadDate"]
-            "{Solution}" = $solution
-        }
-        foreach ($placeholder in $replacements.Keys) { $output = $output.Replace($placeholder, [string]$replacements[$placeholder]) }
+        $solutionPlaceholder = [regex]::Match($output, "\{Solution_[^}]+\}").Value
+        if ($solutionPlaceholder) { $output = $output.Replace($solutionPlaceholder, $solution) }
         $state.Output = $output
     }
     if ($state.Step -lt 4) { $state.Step++; Show-Step }
 })
 
 $back.Add_Click({ if ($state.Step -gt 0) { if ($state.Step -eq 2) { $state.Template = $null }; $state.Step--; Show-Step } })
+$ticketTemplates = @(Get-ChildItem -LiteralPath $ticketTemplateDirectory -Filter "*.json" | Where-Object { $_.Name -ne "Issues.json" } | ForEach-Object {
+    try { Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json }
+    catch { throw "Invalid ticket template JSON: $($_.Name). $($_.Exception.Message)" }
+})
+if ($ticketTemplates.Count -eq 0) { throw "No ticket JSON templates were found in $ticketTemplateDirectory" }
 Show-Step
 
 # Deferrals workflow: device count -> template -> template-specific data -> output.
@@ -297,6 +404,16 @@ function Show-DeferralStep {
             $copy = New-Object System.Windows.Controls.Button -Property @{ Content = "Copy Output"; Width = 110; Margin = "0,10,0,0" }
             $copy.Add_Click({ [System.Windows.Clipboard]::SetText($deferralState.Output); [System.Windows.MessageBox]::Show("Output copied to clipboard.") | Out-Null })
             $deferralContent.Children.Add($copy) | Out-Null
+            $startOver = New-Object System.Windows.Controls.Button -Property @{ Content = "Start Over"; Width = 100; Margin = "0,10,0,0" }
+            $startOver.Add_Click({
+                $deferralState.Step = 0
+                $deferralState.DeviceCount = $null
+                $deferralState.Template = $null
+                $deferralState.Data.Clear()
+                $deferralState.Output = ""
+                Show-DeferralStep
+            })
+            $deferralContent.Children.Add($startOver) | Out-Null
             $deferralNext.IsEnabled = $false
         }
     }

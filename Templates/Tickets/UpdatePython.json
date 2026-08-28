@@ -1,0 +1,14 @@
+{
+  "Name": "Update Python",
+  "ShortTemplateName": "Python",
+  "UniqueId": "PY001",
+  "Description": "Remediate installed Python versions.",
+  "RequiresAdditionalInput": true,
+  "Content": "Summary: Vulnerability Remediation - {DeviceName}\r\n\r\nIssue(s): {Issues}\r\nUser: {UserName}\r\nE/C Code: {ECCode}\r\nPhone: {PhoneNumber}\r\nDevice: {DeviceName}\r\nCompletion Deadline: {CompletionDeadDate}\r\n\r\nSolution(s): {Solution_Python_PY001_001}",
+  "AdditionalFields": [
+    { "Name": "InstalledPython_Python_PY001_001", "Label": "Installed Python version(s):", "Type": "Text", "Required": true, "Hint": "Example: 3.8.10, 3.9.13" },
+    { "Name": "Action_Python_PY001_001", "Label": "Action:", "Type": "Choice", "Options": [ "Update to a target version", "Remove the affected version(s)" ], "Required": true },
+    { "Name": "TargetVersion_Python_PY001_001", "Label": "Target Python version:", "Type": "Text", "RequiredWhen": "Action_Python_PY001_001=Update to a target version" },
+    { "Name": "SolutionNotes_Python_PY001_001", "Label": "Additional solution details:", "Type": "Multiline", "Required": false }
+  ]
+}

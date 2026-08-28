@@ -1,0 +1,6 @@
+{
+  "Name": "Example - No Additional Input",
+  "Description": "Example template that uses only the standard ticket fields.",
+  "RequiresAdditionalInput": false,
+  "Content": "Summary: Example ticket for {DeviceName}\r\n\r\nIssue(s): Enter the issue details above.\r\nUser: {UserName}\r\nE/C Code: {ECCode}\r\nPhone: {PhoneNumber}\r\nDevice: {DeviceName}\r\nCompletion Deadline: {CompletionDeadDate}\r\n\r\nSolution(s): Standard ticket processing."
+}
